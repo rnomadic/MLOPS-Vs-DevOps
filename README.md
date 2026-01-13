@@ -1,15 +1,7 @@
 # MLOps & LLMOps Engineering Excellence
 
-This repository serves as a comprehensive technical guide and implementation framework for MLOps (Machine Learning Operations) and LLMOps (Large Language Model Operations). It covers end-to-end lifecycles from CI/CD integration to real-time fraud detection and LLM observability.
+This repository serves as a comprehensive technical guide and implementation framework for MLOps (Machine Learning Operations).
 
-## 📖 Table of Contents
-- [CI/CD: DevOps vs. MLOps](#cicd-devops-vs-mlops)
-- [Cloud Deployment (GCP & Azure)](#cloud-deployment)
-- [Zero-Downtime Strategies with Helm](#zero-downtime-strategies-with-helm)
-- [Infrastructure as Code (Terraform)](#infrastructure-as-code)
-- [Experiment Tracking with MLflow](#experiment-tracking-with-mlflow)
-- [Case Study: Real-Time Fraud Detection](#case-study-real-time-fraud-detection)
-- [The LLMOps Pipeline](#the-llmops-pipeline)
 
 ---
 
@@ -22,16 +14,31 @@ MLOps introduces a "Third Pillar" to traditional CI/CD: **Continuous Training (C
 | **Core Artifact** | Code & Configuration | Code, Data, & Model |
 | **Triggers** | Git Commits | Code changes, Data changes, Performance decay |
 | **Testing** | Unit & Integration tests | Data validation, Model quality, Bias detection |
+| **Version Control** | Code versioning (Git) | Versioning for Code (Git), Data (DVC/Feature Stores), and Models (Model Registry, e.g., MLflow) |
 
 ---
 
-## 🚀 Cloud Deployment
+## 🚀 The MLOps CI/CD is multi-trigger
+Code change: CI -> CT ->CD: 
+Data Change: CT -> CD: New data arrives (e.g., a nightly job aggregates new customer data).
+Model Degradation: CT -> CD: 
 
-### GCP (Call Centre Optimization App)
-The application is containerized using Docker and orchestrated via Google Kubernetes Engine (GKE).
-1. **Build:** Containerize FastAPI/LangChain app.
-2. **Store:** Push to GCP Artifact Registry.
-3. **Deploy:** Managed via GKE with Horizontal Pod Autoscaling (HPA) to handle traffic spikes.
+
+### CI – The Core Trigger Mechanism: The Git Webhook
+When a developer (or data scientist) pushes new code to the central repository (e.g., a git push to the main or a feature branch), the following happens:
+1.	The Event: The version control system (like GitHub, GitLab, or Azure DevOps) detects the new commit/merge.
+2.	The Notification (Webhook): The system immediately sends an automated message, called a webhook, to the central CI/CD orchestrator (e.g. GitHub Actions, Jenkins, or Kubeflow).
+3.	The Activation: The orchestrator receives the signal and initiates the first stage of the pipeline (Continuous Integration).
+
+Please check MLOPS\CI-workflow.yml.
+This CI workflow is now ready to be saved inside the. github/workflows/ directory of your GitHub repository. 
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
 
 ### Zero-Downtime Strategies with Helm
 Using **Helm Charts** allows for version-controlled deployments. For zero-downtime on AKS/GKE:
