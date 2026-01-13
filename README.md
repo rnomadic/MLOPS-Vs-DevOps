@@ -113,12 +113,12 @@ We have 2 option to deploy. Either we can use AWS ECS/EKS or we can use AWS sage
 Please see the file MLOPS\CI-workflow.yml. This file will go into the repository as (./github/workflows/ CI-workflow.yml): <br>
 
 ##### 🔑 Key Deployment Prerequisites
-For this Continuous Deployment (CD) job to work, you must set up the following:
-•	AWS Infrastructure: You need a running ECS Cluster, an ECS Service, and a Task Definition file (e.g., this should go in github as infrastructure/fraud-detector-task-def.json).
-•	GitHub Secrets:
-  o	AWS_DEPLOYMENT_ROLE_ARN: You must create an IAM Role in AWS that trusts your GitHub repository via OpenID Connect (OIDC). The ARN for this role must be stored in a GitHub Secret named AWS_OIDC_ROLE_ARN.
-  o	AWS_ECS_CLUSTER_NAME: The name of the Amazon ECS cluster where your service runs.
-•	Deployment Mechanism: The example uses aws-actions/amazon-ecs-deploy-task-definition@v1 to update an existing ECS service with the new Docker image.
+For this Continuous Deployment (CD) job to work, you must set up the following:<br>
+•	AWS Infrastructure: You need a running ECS Cluster, an ECS Service, and a Task Definition file (e.g., this should go in github as infrastructure/fraud-detector-task-def.json).<br>
+•	GitHub Secrets: <br>
+  o	AWS_DEPLOYMENT_ROLE_ARN: You must create an IAM Role in AWS that trusts your GitHub repository via OpenID Connect (OIDC). The ARN for this role must be stored in a GitHub Secret named AWS_OIDC_ROLE_ARN. <br>
+  o	AWS_ECS_CLUSTER_NAME: The name of the Amazon ECS cluster where your service runs. <br>
+•	Deployment Mechanism: The example uses aws-actions/amazon-ecs-deploy-task-definition@v1 to update an existing ECS service with the new Docker image. <br>
 
 
 
