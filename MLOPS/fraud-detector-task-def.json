@@ -1,0 +1,45 @@
+{
+  "family": "fraud-detector-task-def",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecs-task-execution-role",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecs-task-execution-role",
+  "networkMode": "awsvpc",
+  "cpu": "1024",
+  "memory": "2048",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "containerDefinitions": [
+    {
+      "name": "fraud-detector-container",
+      
+      "image": "ghcr.io/your-github-org/your-repo/fraud-detector:IMAGE_TAG_PLACEHOLDER",
+      
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/fraud-detector-service",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "environment": [
+        {
+          "name": "MODEL_ENVIRONMENT",
+          "value": "staging"
+        },
+        {
+          "name": "LISTEN_PORT",
+          "value": "8080"
+        }
+      ]
+    }
+  ]
+}

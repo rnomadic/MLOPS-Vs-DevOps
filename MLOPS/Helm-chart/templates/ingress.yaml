@@ -1,0 +1,26 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ml-inference.fullname" . }}
+  labels:
+    {{- include "ml-inference.labels" . | nindent 4 }}
+  annotations:
+    # Use the Azure App Gateway Ingress Controller (or other) for production AKS
+    kubernetes.io/ingress.class: azure/application-gateway 
+    # Optional: Configure CORS or other security headers
+    appgw.ingress.kubernetes.io/cookie-based-affinity: "true"
+spec:
+  rules:
+    - host: {{ .Values.ingress.host }} # e.g., api.ideogen.ai
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }} # e.g., /v1/predict
+            pathType: Prefix
+            backend:
+              service:
+                # Directs traffic to the internal Service created above
+                name: {{ include "ml-inference.fullname" . }} 
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

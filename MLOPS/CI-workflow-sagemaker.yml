@@ -1,0 +1,206 @@
+# 1. Workflow Name
+name: Fraud Detection Model CI/CD
+
+# 2. Trigger Events
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# Define reusable variables for registry and image
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/fraud-detector
+  AWS_REGION: us-east-1              # Define your AWS region here
+  SAGEMAKER_ENDPOINT_NAME: fraud-detection-endpoint # The name of your SageMaker Endpoint
+  SAGEMAKER_INSTANCE_TYPE: ml.t2.medium # Inference instance type
+
+# 3. Define Jobs
+jobs:
+  # Job 1: Unit Testing and Code Quality Check (Omitted for brevity, assumed unchanged)
+  test:
+    # ... (content remains the same as previous response) ...
+    name: Test Code Integrity & Model Performance
+    strategy:
+      matrix:
+        python-version: ['3.10']
+        os: [ubuntu-latest] 
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      - name: Evaluate Model Performance (Precision/Recall Check)
+        # Sets the environment variables used by tests/test_model_performance.py
+        env:
+          BENCHMARK_PRECISION: 0.88 
+          BENCHMARK_RECALL: 0.75    
+          MODEL_ARTIFACT_PATH: models/latest_model.pkl
+        # If pytest fails (due to assertion failure in test_model_benchmarks), the job stops here.
+        #run: pytest --cov=./ --cov-report=xml"
+        run: pytest tests/model-performance-pytest.py --cov=src/ --cov-report=xml
+      - name: Run Linting (Code Quality)
+        run: |
+          pip install flake8
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+  # Job 2: Build and Push Docker Image (Omitted for brevity, assumed unchanged)
+  build_and_push_docker:
+    # ... (content remains the same as previous response) ...
+    name: Build & Push Docker Image
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=,suffix=,enable=true
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # Job 3: Continuous Training (CT) - Train and Store New Model
+  continuous_training:
+    name: Run Model Training & Store Artifact
+    needs: [build_and_push_docker]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write 
+      contents: read
+    outputs:
+      # Pass the S3 URI of the new model artifact to the next job
+      model_artifact_uri: ${{ steps.upload_model.outputs.model_uri }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TRAINING_ROLE_ARN }} 
+          aws-region: ${{ env.AWS_REGION }} 
+
+      - name: Run Model Training in Docker
+        run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          mkdir -p artifacts
+          docker run --rm \
+            -v ${PWD}/artifacts:/app/artifacts \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            python src/train.py --output-path /app/artifacts/new_model.pkl
+
+      - name: Upload Model to S3 Bucket
+        id: upload_model
+        run: |
+          MODEL_URI="s3://${{ secrets.AWS_MODEL_BUCKET }}/production/model_$(date +%Y%m%d%H%M%S).pkl"
+          aws s3 cp artifacts/new_model.pkl ${MODEL_URI}
+          # Set output variable for the next job to use
+          echo "model_uri=${MODEL_URI}" >> $GITHUB_OUTPUT
+
+  # Job 4: Continuous Deployment (CD) - Deploy the New Model to SageMaker
+  continuous_deployment:
+    name: Deploy to SageMaker Endpoint
+    # Depends on the training job for the model artifact URI
+    needs: [continuous_training]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write 
+      contents: read
+      
+    # Use the output from the previous job
+    env:
+      NEW_MODEL_URI: ${{ needs.continuous_training.outputs.model_artifact_uri }}
+      # Use the image tag generated during the build job (the commit SHA)
+      NEW_IMAGE_URI: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials for Deployment
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOYMENT_ROLE_ARN }} 
+          aws-region: ${{ env.AWS_REGION }}
+
+      # --- SageMaker Deployment Sequence ---
+
+      # 1. Generate unique names for the Model and Endpoint Configuration
+      - name: Define SageMaker Resource Names
+        id: names
+        run: |
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          MODEL_NAME="fraud-model-${TIMESTAMP}"
+          CONFIG_NAME="fraud-config-${TIMESTAMP}"
+          
+          echo "MODEL_NAME=${MODEL_NAME}" >> $GITHUB_ENV
+          echo "CONFIG_NAME=${CONFIG_NAME}" >> $GITHUB_ENV
+          echo "Created new Model Name: ${MODEL_NAME}"
+          echo "Created new Config Name: ${CONFIG_NAME}"
+          
+      # 2. Create a new SageMaker Model resource
+      # This links the new Docker image (from GHCR) and the new model artifact (from S3)
+      - name: Create SageMaker Model
+        run: |
+          aws sagemaker create-model \
+            --model-name ${{ env.MODEL_NAME }} \
+            --execution-role-arn ${{ secrets.AWS_SAGEMAKER_EXECUTION_ROLE_ARN }} \
+            --primary-container Image=${{ env.NEW_IMAGE_URI }},ModelDataUrl=${{ env.NEW_MODEL_URI }}
+            
+      # 3. Create a new SageMaker Endpoint Configuration
+      # This specifies the deployment details (instance type, variant) for the new model
+      - name: Create SageMaker Endpoint Configuration
+        run: |
+          aws sagemaker create-endpoint-config \
+            --endpoint-config-name ${{ env.CONFIG_NAME }} \
+            --production-variants VariantName=AllTraffic,ModelName=${{ env.MODEL_NAME }},InitialInstanceCount=1,InstanceType=${{ env.SAGEMAKER_INSTANCE_TYPE }}
+          
+      # 4. Update the existing SageMaker Endpoint
+      # This performs a zero-downtime Blue/Green update to switch to the new configuration
+      - name: Update SageMaker Endpoint
+        run: |
+          aws sagemaker update-endpoint \
+            --endpoint-name ${{ env.SAGEMAKER_ENDPOINT_NAME }} \
+            --endpoint-config-name ${{ env.CONFIG_NAME }}
+
+      # 5. Wait for Endpoint Update to Complete
+      # This ensures the workflow waits for the deployment to finish successfully
+      - name: Wait for Endpoint Update
+        run: |
+          echo "Waiting for SageMaker endpoint update to complete..."
+          aws sagemaker wait endpoint-in-service \
+            --endpoint-name ${{ env.SAGEMAKER_ENDPOINT_NAME }}
+          echo "✅ SageMaker Endpoint ${{ env.SAGEMAKER_ENDPOINT_NAME }} updated successfully with model ${{ env.MODEL_NAME }}!"

@@ -1,0 +1,222 @@
+# 1. Workflow Name
+name: Fraud Detection Model CI/CD
+
+# 2. Trigger Events
+# This workflow runs when a change is pushed to 'main' or a pull request is opened against 'main'.
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# Define reusable variables for registry and image
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/fraud-detector
+  # Define the target environment variables for configuration
+  STAGING_SERVICE_NAME: fraud-detector-staging-svc
+  
+# 3. Define Jobs
+jobs:
+  # Job 1: Unit Testing and Model Performance Check
+  test:
+    name: Test Code Integrity & Model Performance
+    # Runs the test suite across multiple Python versions.
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+        os: [ubuntu-latest] 
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Evaluate Model Performance (Precision/Recall Check)
+        # Sets the environment variables used by tests/test_model_performance.py
+        env:
+          BENCHMARK_PRECISION: 0.88 
+          BENCHMARK_RECALL: 0.75    
+          MODEL_ARTIFACT_PATH: models/latest_model.pkl
+        # If pytest fails (due to assertion failure in test_model_benchmarks), the job stops here.
+        run: pytest tests/model-performance-pytest.py --cov=src/ --cov-report=xml
+
+      - name: Run Linting (Code Quality)
+        run: |
+          pip install flake8
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+  # Job 2: Build and Push Docker Image
+  build_and_push_docker:
+    name: Build & Push Docker Image
+    # This job only runs if the 'test' job (across all matrix configurations) completes successfully.
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write 
+    # Output the image tag so the deployment job can access the exact SHA
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=,suffix=,enable=true
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            
+      - name: Build and Push Docker image
+        id: build_image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Output the resulting SHA-tagged image name for the deployment job
+          outputs: "type=image,name=${{ steps.meta.outputs.tags }},enable-latest=true"
+
+  # Job 3: Continuous Training (CT) - Train and Store New Model
+  continuous_training:
+    name: Run Model Training & Store Artifact
+    # This job only runs if the 'build_and_push_docker' job succeeds.
+    needs: [build_and_push_docker]
+    runs-on: ubuntu-latest
+    permissions:
+      # Required for OIDC authentication with AWS
+      id-token: write 
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # --- Setup AWS Credentials (using OIDC and IAM Role) ---
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # ARN of the IAM Role with S3 permissions (stored in GitHub Secrets)
+          role-to-assume: ${{ secrets.AWS_TRAINING_ROLE_ARN }} 
+          aws-region: ${{ env.AWS_REGION }} 
+          # Assuming you have aws-cli installed in the runner environment
+
+      # --- Execute Training within the Docker Container ---
+      - name: Run Model Training in Docker
+        # Log in to GHCR to pull the image
+        run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          # Create a directory to store the output model artifact
+          mkdir -p artifacts
+          
+          # Run the training script inside the container
+          # The -v mounts the 'artifacts' directory for the model to be saved locally
+          docker run --rm \
+            -v ${PWD}/artifacts:/app/artifacts \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            python src/train.py --output-path /app/artifacts/new_model.pkl
+
+      # --- Store the Model Artifact (The new, trained model) ---
+      - name: Upload Model to S3 Bucket
+        run: |
+          # Use aws-cli to upload the artifact saved in the 'artifacts' folder
+          aws s3 cp artifacts/new_model.pkl s3://${{ secrets.AWS_MODEL_BUCKET }}/production/model_$(date +%Y%m%d%H%M%S).pkl
+          
+      # --- Cleanup (Optional) ---
+      - name: Cleanup Docker Images
+        if: always() # Run cleanup even if previous steps fail
+        run: docker rmi ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+  
+  
+  # Job 4: Dedicated Deployment to Staging Environment (AWS)
+  deploy_to_staging:
+    name: Deploy to Staging (AWS ECS)
+    # This job ONLY runs if the image build and push was successful.
+    needs: [build_and_push_docker]
+    # Restrict deployment to only occur on pushes to the main branch
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    # REQUIRED for OIDC authentication with AWS
+    permissions:
+      id-token: write # Required for assuming the IAM role via OIDC
+      contents: read
+
+    environment: 
+      name: Staging # Uses a GitHub environment for protection rules and secrets
+      url: https://staging.example.com/fraud-detector # Link to your deployed service
+      
+    # Define AWS environment variables needed for the deployment steps
+    env:
+      AWS_REGION: us-east-1 # <<< CHANGE THIS TO YOUR AWS REGION
+      # Replace this with the ARN of the IAM role dedicated to your GitHub Actions runner
+      AWS_DEPLOYMENT_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }} # <<< SECRETS REQUIRED
+      # Required for ECS deployment, replace with your actual values
+      ECS_CLUSTER_NAME: fraud-detection-cluster # <<< CHANGE THIS
+      ECS_SERVICE_NAME: ${{ env.STAGING_SERVICE_NAME }} 
+      ECS_TASK_DEFINITION: fraud-detector-task-def.json # <<< Requires this file in the repo
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Step 1: Configure AWS Credentials (OIDC Authentication)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Step 2: Get the newly built image tag
+      - name: Get Image Tag
+        id: image_tag_step
+        # Retrieve the tags output from the 'build_and_push_docker' job
+        run: |
+          # The output is a comma-separated string like: ghcr.io/repo/img@sha256:...,ghcr.io/repo/img:latest
+          # We extract the SHA-based tag (the first one)
+          TAG=$(echo ${{ needs.build_and_push_docker.outputs.image_tag }} | cut -d ',' -f 1)
+          echo "::set-output name=IMAGE_TAG::$TAG"
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          
+      # Step 3: Deploy to AWS ECS
+      # This step assumes deployment to Amazon ECS using the standard ECS deployment action.
+      # It requires a task definition file (e.g., fraud-detector-task-def.json) in your repository.
+      - name: Deploy Container to ECS Staging Service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          service: ${{ env.ECS_SERVICE_NAME }}
+          cluster: ${{ env.ECS_CLUSTER_NAME }}
+          # Pass the newly built image tag to the ECS service
+          image: ${{ env.IMAGE_TAG }}
