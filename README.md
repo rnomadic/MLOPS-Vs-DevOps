@@ -1,6 +1,8 @@
 # This Repo Is all about MLOPS Engineering
 
-#f03c15 ## 1. What are the differences between CI/CD for traditional software versus CI/CD for an ML model? </span>
+<span style="color: red;"> This Repo Is all about MLOPS Engineering </span>
+
+## 1. What are the differences between CI/CD for traditional software versus CI/CD for an ML model? </span>
 ### The MLOps CI/CD is multi-trigger
 ### Code change: CI -> CT ->CD: 
 ### Data Change: CT -> CD: New data arrives (e.g., a nightly job aggregates new customer data).
