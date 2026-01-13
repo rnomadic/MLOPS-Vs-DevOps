@@ -1,4 +1,4 @@
-# MLOps & LLMOps Engineering Excellence
+# MLOps Excellence
 
 This repository serves as a comprehensive technical guide and implementation framework for MLOps (Machine Learning Operations).
 
@@ -119,6 +119,22 @@ For this Continuous Deployment (CD) job to work, you must set up the following:<
   o	AWS_DEPLOYMENT_ROLE_ARN: You must create an IAM Role in AWS that trusts your GitHub repository via OpenID Connect (OIDC). The ARN for this role must be stored in a GitHub Secret named AWS_OIDC_ROLE_ARN. <br>
   o	AWS_ECS_CLUSTER_NAME: The name of the Amazon ECS cluster where your service runs. <br>
 •	Deployment Mechanism: The example uses aws-actions/amazon-ecs-deploy-task-definition@v1 to update an existing ECS service with the new Docker image. <br>
+
+Please see the MLOPS\fraud-detector-task-def.json <br>
+
+### 🕵️ Deploy to SageMaker Endpoint
+Please find the CI-workflow-sagemaker.yml for more detail. <br>
+
+🔑 SageMaker Deployment Prerequisites
+For this new deployment job to function correctly, you must have the following secrets and infrastructure ready: <br>
+1.	Secrets (in GitHub Repository Settings): <br>
+o	AWS_DEPLOYMENT_ROLE_ARN: An IAM Role ARN that GitHub Actions assumes to run the deployment commands (must have permissions to create SageMaker Models, Endpoint Configurations, and update Endpoints). <br>
+o	AWS_SAGEMAKER_EXECUTION_ROLE_ARN: The SageMaker Execution Role ARN. This is the IAM role that SageMaker itself uses to read data from S3, pull the Docker image, and run the inference containers. <br>
+o	AWS_MODEL_BUCKET: The S3 bucket name used for storing the model artifact. <br>
+2.	AWS Infrastructure (Pre-existing): <br>
+o	A running SageMaker Endpoint named fraud-detection-endpoint (or whatever you set for SAGEMAKER_ENDPOINT_NAME). If the endpoint doesn't exist, the update-endpoint command will fail, and you would need an initial create-endpoint step. <br>
+This workflow executes the standard SageMaker deployment pattern: Create Model → Create Endpoint Configuration → Update Endpoint (which performs the actual deployment). <br>
+
 
 
 
