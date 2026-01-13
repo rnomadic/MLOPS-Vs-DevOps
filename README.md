@@ -1,6 +1,7 @@
 # This Repo Is all about MLOPS Engineering
 
-`#RRGGBB This Repo Is all about MLOPS Engineering`
+<font color="green"> Some green text </font>
+
 ## 1. What are the differences between CI/CD for traditional software versus CI/CD for an ML model?
 ### The MLOps CI/CD is multi-trigger
 ### Code change: CI -> CT ->CD: 
