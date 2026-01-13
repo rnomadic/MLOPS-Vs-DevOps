@@ -30,7 +30,7 @@ When a developer (or data scientist) pushes new code to the central repository (
 2.	The Notification (Webhook): The system immediately sends an automated message, called a webhook, to the central CI/CD orchestrator (e.g. GitHub Actions, Jenkins, or Kubeflow).
 3.	The Activation: The orchestrator receives the signal and initiates the first stage of the pipeline (Continuous Integration).
 
-Please check MLOPS\CI-workflow.yml.
+Please check MLOPS\CI-workflow.yml.<br>
 This CI workflow is now ready to be saved inside the. github/workflows/ directory of your GitHub repository. 
 
 on:
@@ -40,14 +40,30 @@ on:
     branches: [ "main" ]
 
 
-### Zero-Downtime Strategies with Helm
-Using **Helm Charts** allows for version-controlled deployments. For zero-downtime on AKS/GKE:
-- **Blue/Green Deployment:** Run the new model (Green) alongside the old (Blue). Switch traffic only after Green passes health checks.
-- **Canary Deployment:** Route 5-10% of traffic to the new model to monitor for errors before a full rollout.
+
+### It primarily consists of 4 jobs.
+
+### 🛠 Job 1: Unit Testing and Model Performance Check
+
+Runs the test suite across multiple Python versions. Evaluate Model Performance (Precision/Recall Check) <br>
+Please check MLOPS\model-performance-pytest.py <br>
+        # CRITICAL: python test must use assertions <br>
+        # (e.g., 'assert precision >= 0.85') to fail the step if the metric threshold is not met. <br>
+
+In CI-workflow.yml we have below line      </br> 
+run: pytest tests/model-performance-pytest.py --cov=src/ --cov-report=xml <br>
+
+--cov=src/ --cov-report=xml <br>
+This ensures that while you are running a performance test, you are measuring how much of your source code is being exercised by that test. <br>
+
+<img width="805" height="191" alt="image" src="https://github.com/user-attachments/assets/e38b8246-8192-4aa9-ac61-90108f78ab06" />
+
+run: pytest --cov=./ --cov-report=xml"
+The above will run pytest on entire folder.
 
 ---
 
-## 🛠 Infrastructure as Code (Terraform)
+##  📈 
 We use Terraform to ensure environment parity across Staging and Production.
 - **State Management:** Remote state locking is implemented via Azure Blob Storage/S3 to prevent race conditions.
 - **Provisioned Resources:** Azure ML Workspace, AKS Clusters, and Key Vault for secret management.
