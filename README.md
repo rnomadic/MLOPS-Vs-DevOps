@@ -90,7 +90,7 @@ Please see the continuous_training Job in the CI-workflow.yml file.
 This job will use a runner to pull the newly built Docker image, execute the training script inside the container, and handle the resulting model artifact.
 
 docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-#### Run the training script inside the container **
+#### Run the training script inside the container
           
 #### The -v mounts the 'artifacts' directory for the model to be saved locally
   docker run --rm \
@@ -99,30 +99,28 @@ docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
      python src/train.py --output-path /app/artifacts/new_model.pkl
 
 
-## 🕵️ Case Study: Real-Time Fraud Detection
-The system is designed for sub-100ms latency using a microservices architecture.
-- **Inference Service:** A Python/FastAPI service optimized for throughput.
-- **Feature Store:** Redis/Hopsworks for low-latency retrieval of user transaction history.
-- **Troubleshooting:** If performance drops, we analyze for **Covariate Drift** (input distribution changes) or **Concept Drift** (the definition of fraud has evolved).
-
----
-
-## 🤖 The LLMOps Pipeline
-LLMOps extends MLOps to handle the unique challenges of non-deterministic models.
+## 🤖 Job 4: Deployment to Staging Environment (AWS)
+After the CI workflow successfully builds the container image and pushes it to a registry, the CD pipeline is typically triggered by one of three primary mechanisms: 
+1.	Image Push Event, 
+2.	Git Tagging and Releases (Manual Process), 
+3.	Dedicated Deployment Workflow (using GitHub Actions)
 
 
+#### Implementation using GitHub Actions (Recommended):
+We have 2 option to deploy. Either we can use AWS ECS/EKS or we can use AWS sagemaker endpoint.
 
-### Evaluation & Guardrails
-- **LLM-as-a-Judge:** Using frameworks like **Ragas** or **DeepEval** to have a strong model (e.g., GPT-4) grade a smaller model (e.g., Llama-3).
-- **Metrics:** Faithfulness, Relevance, and Tone.
-- **Guardrails:** Implementation of **NVIDIA NeMo Guardrails** to prevent PII leakage and toxicity.
+### 🕵️ Deploy to Staging (AWS ECS/EKS)
+Please see the file MLOPS\CI-workflow.yml. This file will go into the repository as (./github/workflows/ CI-workflow.yml): <br>
 
-### Recommended Stack
-| Component | Tools |
-| :--- | :--- |
-| **Orchestration** | LangChain, LlamaIndex |
-| **Vector DB** | Pinecone, Milvus, ChromaDB |
-| **Serving** | vLLM, TGI, Ollama |
-| **Monitoring** | Arize Phoenix, Weights & Biases |
+##### 🔑 Key Deployment Prerequisites
+For this Continuous Deployment (CD) job to work, you must set up the following:
+•	AWS Infrastructure: You need a running ECS Cluster, an ECS Service, and a Task Definition file (e.g., this should go in github as infrastructure/fraud-detector-task-def.json).
+•	GitHub Secrets:
+  o	AWS_DEPLOYMENT_ROLE_ARN: You must create an IAM Role in AWS that trusts your GitHub repository via OpenID Connect (OIDC). The ARN for this role must be stored in a GitHub Secret named AWS_OIDC_ROLE_ARN.
+  o	AWS_ECS_CLUSTER_NAME: The name of the Amazon ECS cluster where your service runs.
+•	Deployment Mechanism: The example uses aws-actions/amazon-ecs-deploy-task-definition@v1 to update an existing ECS service with the new Docker image.
+
+
+
 
 ---
